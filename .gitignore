@@ -1,0 +1,14 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.log
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
