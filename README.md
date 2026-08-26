@@ -6,6 +6,12 @@ Codex Notch is an experimental native macOS companion that turns the display not
 
 > **Review status.** The code is being prepared for portfolio review. No open-source license has been granted yet; see [License and reuse](#license-and-reuse).
 
+## Ownership and evidence boundary
+
+This is an independent experimental project. I defined the low-interruption status experience, task-state model, privacy boundary, synthetic QA approach, and safe installation behavior. AI coding agents supported implementation and review under my direction; I reviewed changes and verified the public snapshot with synthetic data and CI.
+
+The project depends on undocumented local Codex implementation details and may require adaptation after product updates. It demonstrates native product prototyping and systems reasoning, not external adoption or an official OpenAI integration.
+
 ## What it demonstrates
 
 - A low-interruption notch lens that expands into a native task dashboard.
