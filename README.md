@@ -4,7 +4,7 @@ Codex Notch is an experimental native macOS companion that turns the display not
 
 > **Unofficial project.** This repository is not affiliated with, maintained by, or endorsed by OpenAI. Codex and OpenAI are names and marks of their respective owner.
 
-> **Review status.** The code is being prepared for portfolio review. No open-source license has been granted yet; see [License and reuse](#license-and-reuse).
+> **Review status.** This is a public portfolio snapshot. No open-source license has been granted; see [License and reuse](#license-and-reuse).
 
 ## Ownership and evidence boundary
 
