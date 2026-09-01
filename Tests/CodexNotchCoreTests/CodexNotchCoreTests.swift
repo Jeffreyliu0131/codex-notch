@@ -1,29 +1,32 @@
 import Foundation
-import XCTest
+import Testing
 @testable import CodexNotchCore
 
-final class CodexNotchCoreTests: XCTestCase {
-    func testTaskStateMapsAttentionAndFailure() {
-        XCTAssertEqual(
+@Suite
+struct CodexNotchCoreTests {
+    @Test
+    func taskStateMapsAttentionAndFailure() {
+        #expect(
             CodexTaskState.appServerStatus(
                 type: "active",
                 activeFlags: ["waitingOnApproval"]
-            ),
-            .needsAttention
+            ) == .needsAttention
         )
-        XCTAssertEqual(CodexTaskState.appServerStatus(type: "systemError"), .failed)
-        XCTAssertEqual(CodexTaskState.appServerStatus(type: "idle"), .inactive)
+        #expect(CodexTaskState.appServerStatus(type: "systemError") == .failed)
+        #expect(CodexTaskState.appServerStatus(type: "idle") == .inactive)
     }
 
-    func testTaskTextIsSingleLineAndBounded() {
-        XCTAssertEqual(
-            TaskTextSanitizer.compact("\n  Sample   task  \nprivate second line"),
-            "Sample task"
+    @Test
+    func taskTextIsSingleLineAndBounded() {
+        #expect(
+            TaskTextSanitizer.compact("\n  Sample   task  \nprivate second line")
+                == "Sample task"
         )
-        XCTAssertEqual(TaskTextSanitizer.compact("123456", limit: 5), "1234…")
+        #expect(TaskTextSanitizer.compact("123456", limit: 5) == "1234…")
     }
 
-    func testRepositoryIdentityGroupsWorktreesByOrigin() {
+    @Test
+    func repositoryIdentityGroupsWorktreesByOrigin() {
         let first = CodexProjectIdentity.resolve(
             workspacePath: "/Users/demo/Projects/app-main",
             repositoryURL: "git@github.com:example/sample-app.git"
@@ -33,11 +36,12 @@ final class CodexNotchCoreTests: XCTestCase {
             repositoryURL: "https://github.com/example/sample-app.git"
         )
 
-        XCTAssertEqual(first.id, second.id)
-        XCTAssertEqual(first.name, "sample-app")
+        #expect(first.id == second.id)
+        #expect(first.name == "sample-app")
     }
 
-    func testLocalRepositoryDoesNotStorePromptPreview() throws {
+    @Test
+    func localRepositoryDoesNotStorePromptPreview() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexNotchCoreTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -89,9 +93,9 @@ final class CodexNotchCoreTests: XCTestCase {
         )
 
         let tasks = try LocalTaskRepository(codexHome: directory).loadTasks(limit: 5)
-        XCTAssertEqual(tasks.count, 1)
-        XCTAssertEqual(tasks.first?.title, "Synthetic task")
-        XCTAssertEqual(tasks.first?.preview, "")
+        #expect(tasks.count == 1)
+        #expect(tasks.first?.title == "Synthetic task")
+        #expect(tasks.first?.preview == "")
     }
 
     private func runSQLite(database: URL, sql: String) throws {

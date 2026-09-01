@@ -22,7 +22,7 @@ env \
     SWIFTPM_MODULECACHE_OVERRIDE="$MODULE_CACHE_DIR" \
     CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_DIR" \
     SDKROOT="$SDK_PATH" \
-    swift build --sdk "$SDK_PATH" -c release
+    swift build --disable-sandbox --sdk "$SDK_PATH" -c release
 
 mkdir -p "$MACOS_DIR"
 cp "$PROJECT_DIR/.build/release/CodexNotch" "$MACOS_DIR/CodexNotch"

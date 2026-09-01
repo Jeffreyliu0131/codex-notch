@@ -56,8 +56,12 @@ final class NotchPanelController: NSObject {
     private let presentation = PanelPresentation()
     private let panel: FloatingNotchPanel
     private var collapseWorkItem: DispatchWorkItem?
+    private var approvalCollapseWorkItem: DispatchWorkItem?
     private var reanchorWorkItems: [DispatchWorkItem] = []
     private var isObservingDisplayLifecycle = false
+    private var isHoverExpanded = false
+    private var isManualExpanded = false
+    private var isApprovalExpanded = false
     private var cancellables: Set<AnyCancellable> = []
 
     var hasNotch: Bool { profile.hasNotch }
@@ -82,6 +86,12 @@ final class NotchPanelController: NSObject {
                 self.updateFrame(animated: true)
             }
             .store(in: &cancellables)
+        model.$latestApprovalAlert
+            .compactMap { $0 }
+            .sink { [weak self] _ in
+                self?.presentApprovalAlert()
+            }
+            .store(in: &cancellables)
         updateFrame(animated: false)
     }
 
@@ -96,16 +106,31 @@ final class NotchPanelController: NSObject {
         reanchorWorkItems.removeAll()
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
+        approvalCollapseWorkItem?.cancel()
+        approvalCollapseWorkItem = nil
+        isHoverExpanded = false
+        isManualExpanded = false
+        isApprovalExpanded = false
         presentation.isExpanded = false
         panel.orderOut(nil)
     }
 
     func toggle() {
-        setExpanded(!presentation.isExpanded)
+        if presentation.isExpanded {
+            isHoverExpanded = false
+            isManualExpanded = false
+            isApprovalExpanded = false
+            collapseWorkItem?.cancel()
+            approvalCollapseWorkItem?.cancel()
+        } else {
+            isManualExpanded = true
+        }
+        reconcileExpansion()
     }
 
     func expand() {
-        setExpanded(true)
+        isManualExpanded = true
+        reconcileExpansion()
     }
 
     private func configurePanel() {
@@ -127,9 +152,10 @@ final class NotchPanelController: NSObject {
                 model: model,
                 presentation: presentation,
                 profile: profile,
-                onExpansionRequest: { [weak self] expanded in
-                    self?.requestExpansion(expanded)
-                }
+                onHoverChange: { [weak self] hovering in
+                    self?.requestHoverExpansion(hovering)
+                },
+                onToggleRequest: { [weak self] in self?.toggle() }
             )
         )
     }
@@ -198,20 +224,39 @@ final class NotchPanelController: NSObject {
         panel.orderFrontRegardless()
     }
 
-    private func requestExpansion(_ expanded: Bool) {
+    private func requestHoverExpansion(_ expanded: Bool) {
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
 
         if expanded {
-            setExpanded(true)
+            isHoverExpanded = true
+            reconcileExpansion()
             return
         }
 
         let work = DispatchWorkItem { [weak self] in
-            self?.setExpanded(false)
+            self?.isHoverExpanded = false
+            self?.reconcileExpansion()
         }
         collapseWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+    }
+
+    private func presentApprovalAlert() {
+        approvalCollapseWorkItem?.cancel()
+        isApprovalExpanded = true
+        reconcileExpansion()
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.isApprovalExpanded = false
+            self?.reconcileExpansion()
+        }
+        approvalCollapseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+    }
+
+    private func reconcileExpansion() {
+        setExpanded(isHoverExpanded || isManualExpanded || isApprovalExpanded)
     }
 
     private func setExpanded(_ expanded: Bool) {

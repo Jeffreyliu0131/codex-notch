@@ -6,14 +6,16 @@ import Foundation
 final class CodexUsageClient {
     typealias SnapshotHandler = @MainActor (CodexUsageSnapshot) -> Void
     typealias StatusHandler = @MainActor (String) -> Void
-    typealias ThreadSnapshotHandler = @MainActor ([String: CodexTaskState]) -> Void
-    typealias ThreadStateHandler = @MainActor (String, CodexTaskState) -> Void
+    typealias ThreadSnapshotHandler = @MainActor ([String: CodexTaskActivity]) -> Void
+    typealias ThreadActivityHandler = @MainActor (String, CodexTaskActivity) -> Void
+    typealias ThreadObservationHandler = @MainActor (String, CodexThreadObservation?) -> Void
     typealias ThreadResetHandler = @MainActor () -> Void
 
     private let onSnapshot: SnapshotHandler
     private let onStatus: StatusHandler
     private let onThreadSnapshot: ThreadSnapshotHandler
-    private let onThreadState: ThreadStateHandler
+    private let onThreadActivity: ThreadActivityHandler
+    private let onThreadObservation: ThreadObservationHandler
     private let onThreadReset: ThreadResetHandler
     private var server: Process?
     private var stdin: Pipe?
@@ -23,18 +25,21 @@ final class CodexUsageClient {
     private var nextRequestID = 10
     private var usageRequestIDs: Set<Int> = []
     private var threadListRequestIDs: Set<Int> = []
+    private var threadReadRequestIDs: [Int: String] = [:]
 
     init(
         onSnapshot: @escaping SnapshotHandler,
         onStatus: @escaping StatusHandler,
         onThreadSnapshot: @escaping ThreadSnapshotHandler,
-        onThreadState: @escaping ThreadStateHandler,
+        onThreadActivity: @escaping ThreadActivityHandler,
+        onThreadObservation: @escaping ThreadObservationHandler,
         onThreadReset: @escaping ThreadResetHandler
     ) {
         self.onSnapshot = onSnapshot
         self.onStatus = onStatus
         self.onThreadSnapshot = onThreadSnapshot
-        self.onThreadState = onThreadState
+        self.onThreadActivity = onThreadActivity
+        self.onThreadObservation = onThreadObservation
         self.onThreadReset = onThreadReset
     }
 
@@ -108,7 +113,7 @@ final class CodexUsageClient {
                     "clientInfo": [
                         "name": "codex_notch",
                         "title": "Codex Notch",
-                        "version": "0.2.0"
+                        "version": Self.appVersion
                     ]
                 ]
             ])
@@ -159,6 +164,24 @@ final class CodexUsageClient {
         cleanUp()
     }
 
+    @discardableResult
+    func readThread(_ threadID: String) -> Bool {
+        guard server?.isRunning == true,
+              !threadReadRequestIDs.values.contains(threadID) else { return false }
+
+        let requestID = makeRequestID()
+        threadReadRequestIDs[requestID] = threadID
+        write([
+            "id": requestID,
+            "method": "thread/read",
+            "params": [
+                "threadId": threadID,
+                "includeTurns": true
+            ]
+        ])
+        return true
+    }
+
     private func receive(_ data: Data) {
         buffer.append(data)
 
@@ -188,6 +211,8 @@ final class CodexUsageClient {
                 onStatus(detail ?? "额度读取失败")
             } else if threadListRequestIDs.remove(requestID) != nil {
                 onStatus(detail ?? "任务状态同步失败")
+            } else if let threadID = threadReadRequestIDs.removeValue(forKey: requestID) {
+                onThreadObservation(threadID, nil)
             }
             return
         }
@@ -200,14 +225,29 @@ final class CodexUsageClient {
         if threadListRequestIDs.remove(requestID) != nil,
            let result = message["result"] as? [String: Any],
            let rows = result["data"] as? [[String: Any]] {
-            var states: [String: CodexTaskState] = [:]
+            var states: [String: CodexTaskActivity] = [:]
             for row in rows {
                 guard let threadID = row["id"] as? String,
                       let status = row["status"] as? [String: Any],
-                      let state = Self.parseThreadState(status) else { continue }
-                states[threadID] = state
+                      let activity = Self.parseThreadActivity(status) else { continue }
+                states[threadID] = activity
             }
             onThreadSnapshot(states)
+        }
+
+        if let threadID = threadReadRequestIDs.removeValue(forKey: requestID) {
+            guard let result = message["result"] as? [String: Any],
+                  let thread = result["thread"] as? [String: Any] else {
+                onThreadObservation(threadID, nil)
+                return
+            }
+            onThreadObservation(
+                threadID,
+                CodexThreadObservationParser.appServerThread(
+                    thread,
+                    fallbackThreadID: threadID
+                )
+            )
         }
     }
 
@@ -224,35 +264,35 @@ final class CodexUsageClient {
         case "thread/status/changed":
             guard let threadID = params["threadId"] as? String,
                   let status = params["status"] as? [String: Any],
-                  let state = Self.parseThreadState(status) else { return }
-            onThreadState(threadID, state)
+                  let activity = Self.parseThreadActivity(status) else { return }
+            onThreadActivity(threadID, activity)
 
         case "thread/started":
             guard let thread = params["thread"] as? [String: Any],
                   let threadID = thread["id"] as? String,
                   let status = thread["status"] as? [String: Any],
-                  let state = Self.parseThreadState(status) else { return }
-            onThreadState(threadID, state)
+                  let activity = Self.parseThreadActivity(status) else { return }
+            onThreadActivity(threadID, activity)
 
         case "thread/closed", "thread/archived", "thread/deleted":
             guard let threadID = params["threadId"] as? String else { return }
-            onThreadState(threadID, .inactive)
+            onThreadActivity(threadID, CodexTaskActivity(state: .inactive))
 
         case "error":
             guard let threadID = params["threadId"] as? String,
                   (params["willRetry"] as? Bool) == false else { return }
-            onThreadState(threadID, .failed)
+            onThreadActivity(threadID, CodexTaskActivity(state: .failed))
 
         default:
             break
         }
     }
 
-    private static func parseThreadState(_ status: [String: Any]) -> CodexTaskState? {
+    private static func parseThreadActivity(_ status: [String: Any]) -> CodexTaskActivity? {
         let type = status["type"] as? String ?? "notLoaded"
         guard type != "notLoaded" else { return nil }
         let flags = status["activeFlags"] as? [String] ?? []
-        return CodexTaskState.appServerStatus(type: type, activeFlags: flags)
+        return CodexTaskActivity.appServerStatus(type: type, activeFlags: flags)
     }
 
     private func makeRequestID() -> Int {
@@ -285,6 +325,9 @@ final class CodexUsageClient {
         buffer.removeAll(keepingCapacity: false)
         usageRequestIDs.removeAll()
         threadListRequestIDs.removeAll()
+        let abandonedReads = Array(threadReadRequestIDs.values)
+        threadReadRequestIDs.removeAll()
+        abandonedReads.forEach { onThreadObservation($0, nil) }
     }
 
     private static func codexExecutable() -> URL? {
@@ -298,5 +341,10 @@ final class CodexUsageClient {
         return locations
             .map { URL(fileURLWithPath: $0) }
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "development"
     }
 }

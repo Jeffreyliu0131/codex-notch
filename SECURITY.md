@@ -22,7 +22,8 @@ Do not attach a real `state_5.sqlite`, `.codex-global-state.json`, rollout file,
 Security review should pay particular attention to:
 
 - read-only access to local Codex state and rollout files;
-- the local Codex IPC socket and App Server subprocess;
+- the local Codex IPC socket, App Server subprocess, and in-memory approval classifier;
+- macOS notification content, hidden payload minimization, and the hashed approval-alert ledger;
 - task deep links and Accessibility-based navigation;
 - replacement of `/Applications/CodexNotch.app` during explicit installation;
 - the per-user LaunchAgent created by the explicit installer.

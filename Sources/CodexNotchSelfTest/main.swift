@@ -225,12 +225,12 @@ let temporaryGroups = CodexProjectGroup.group([
     projectTask(
         id: "temp-1",
         title: "临时任务一",
-        workspacePath: "/Users/test/Documents/Codex/2026-08-09/new-chat"
+        workspacePath: "/Users/demo/Documents/Codex/2026-08-09/new-chat"
     ),
     projectTask(
         id: "temp-2",
         title: "临时任务二",
-        workspacePath: "/Users/test/Documents/Codex/2026-08-08/new-chat-2"
+        workspacePath: "/Users/demo/Documents/Codex/2026-08-08/new-chat-2"
     )
 ])
 check(

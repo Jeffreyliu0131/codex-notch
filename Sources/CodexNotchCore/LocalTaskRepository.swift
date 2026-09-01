@@ -98,7 +98,8 @@ public final class LocalTaskRepository {
         let activeIDs = activeThreadIDs()
         return rows
             .map { row in
-                CodexTask(
+                let activity = taskActivity(for: row, activeIDs: activeIDs)
+                return CodexTask(
                     id: row.id,
                     title: TaskTextSanitizer.compact(row.displayTitle),
                     preview: "",
@@ -109,17 +110,19 @@ public final class LocalTaskRepository {
                     updatedAt: Date(timeIntervalSince1970: Double(row.updatedMilliseconds) / 1000),
                     tokensUsed: row.tokensUsed,
                     isPinned: row.isPinned != 0,
-                    state: taskState(for: row, activeIDs: activeIDs)
+                    state: activity.state,
+                    attentionReason: activity.attentionReason,
+                    attentionSignalID: activity.signalID
                 )
             }
             .sorted(by: taskOrder)
     }
 
-    private func taskState(for row: TaskRow, activeIDs: Set<String>) -> CodexTaskState {
-        if let lifecycleState = lifecycleReader.state(atPath: row.rolloutPath) {
-            return lifecycleState
+    private func taskActivity(for row: TaskRow, activeIDs: Set<String>) -> CodexTaskActivity {
+        if let lifecycleActivity = lifecycleReader.activity(atPath: row.rolloutPath) {
+            return lifecycleActivity
         }
-        return activeIDs.contains(row.id) ? .running : .inactive
+        return CodexTaskActivity(state: activeIDs.contains(row.id) ? .running : .inactive)
     }
 
     private func activeThreadIDs() -> Set<String> {

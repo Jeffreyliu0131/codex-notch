@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: AppModel?
     private var notchController: NotchPanelController?
     private var menuBarController: MenuBarController?
+    private var notificationCoordinator: ApprovalNotificationCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let target = CodexRemoteThreadNavigator.probeTargetFromArguments() {
@@ -108,13 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel()
         let notchController = NotchPanelController(model: model)
         let menuBarController = MenuBarController(model: model, notchController: notchController)
+        let notificationCoordinator = ApprovalNotificationCoordinator(model: model)
 
         self.model = model
         self.notchController = notchController
         self.menuBarController = menuBarController
+        self.notificationCoordinator = notificationCoordinator
 
         model.start()
         notchController.start()
+        notificationCoordinator.start()
     }
 
     private func deactivateInterface() {
@@ -122,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBarController?.stop()
         notchController?.stop()
+        notificationCoordinator?.stop()
         model.stop()
 
         menuBarController = nil

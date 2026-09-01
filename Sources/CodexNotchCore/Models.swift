@@ -27,19 +27,7 @@ public enum CodexTaskState: String, Equatable, Sendable {
     }
 
     public static func appServerStatus(type: String, activeFlags: [String] = []) -> CodexTaskState {
-        switch type {
-        case "active":
-            return activeFlags.contains("waitingOnApproval")
-                || activeFlags.contains("waitingOnUserInput")
-                ? .needsAttention
-                : .running
-        case "systemError":
-            return .failed
-        case "idle", "notLoaded":
-            return .inactive
-        default:
-            return .inactive
-        }
+        CodexTaskActivity.appServerStatus(type: type, activeFlags: activeFlags).state
     }
 }
 
@@ -111,6 +99,8 @@ public struct CodexTask: Identifiable, Equatable, Sendable {
     public let tokensUsed: Int64
     public let isPinned: Bool
     public let state: CodexTaskState
+    public let attentionReason: CodexAttentionReason?
+    public let attentionSignalID: String?
 
     public init(
         id: String,
@@ -125,7 +115,9 @@ public struct CodexTask: Identifiable, Equatable, Sendable {
         updatedAt: Date,
         tokensUsed: Int64,
         isPinned: Bool,
-        state: CodexTaskState
+        state: CodexTaskState,
+        attentionReason: CodexAttentionReason? = nil,
+        attentionSignalID: String? = nil
     ) {
         self.id = id
         self.hostID = hostID
@@ -140,6 +132,8 @@ public struct CodexTask: Identifiable, Equatable, Sendable {
         self.tokensUsed = tokensUsed
         self.isPinned = isPinned
         self.state = state
+        self.attentionReason = state == .needsAttention ? attentionReason : nil
+        self.attentionSignalID = state == .needsAttention ? attentionSignalID : nil
     }
 
     public var isRunning: Bool { state == .running }
@@ -195,7 +189,29 @@ public struct CodexTask: Identifiable, Equatable, Sendable {
             updatedAt: updatedAt,
             tokensUsed: tokensUsed,
             isPinned: isPinned,
-            state: state
+            state: state,
+            attentionReason: state == .needsAttention ? attentionReason : nil,
+            attentionSignalID: state == .needsAttention ? attentionSignalID : nil
+        )
+    }
+
+    public func withActivity(_ activity: CodexTaskActivity) -> CodexTask {
+        CodexTask(
+            id: id,
+            hostID: hostID,
+            deviceName: deviceName,
+            title: title,
+            preview: preview,
+            workspacePath: workspacePath,
+            repositoryURL: repositoryURL,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            updatedAt: updatedAt,
+            tokensUsed: tokensUsed,
+            isPinned: isPinned,
+            state: activity.state,
+            attentionReason: activity.attentionReason,
+            attentionSignalID: activity.signalID
         )
     }
 }

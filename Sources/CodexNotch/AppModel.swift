@@ -11,10 +11,17 @@ enum PreviewMode {
     case idle
 }
 
+struct CodexApprovalAlert: Identifiable, Equatable {
+    let id: String
+    let task: CodexTask
+    let reason: CodexAttentionReason
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var tasks: [CodexTask] = []
     @Published private(set) var completionPulseSequence: UInt = 0
+    @Published private(set) var latestApprovalAlert: CodexApprovalAlert?
     @Published private(set) var viewedCompletionIDs: Set<String> = []
     @Published private(set) var usage: CodexUsageSnapshot?
     @Published private(set) var taskError: String?
@@ -36,13 +43,15 @@ final class AppModel: ObservableObject {
     private var localRepositoryTasks: [String: CodexTask] = [:]
     private var remoteRepositoryTasks: [String: CodexTask] = [:]
     private var taskCache: [String: CodexTask] = [:]
-    private var serverStates: [String: CodexTaskState] = [:]
-    private var desktopStates: [String: CodexTaskState] = [:]
+    private var serverActivities: [String: CodexTaskActivity] = [:]
+    private var desktopActivities: [String: CodexTaskActivity] = [:]
     private var effectiveStates: [String: CodexTaskState] = [:]
     private var transientStates: [String: TransientTaskState] = [:]
     private var transientWorkItems: [String: DispatchWorkItem] = [:]
     private var hasRepositoryBaseline = false
     private var hasServerBaseline = false
+    private var threadReadsInFlight: Set<String> = []
+    private let alertLedger: CodexApprovalAlertLedger
     private let remoteThreadNavigator = CodexRemoteThreadNavigator()
 
     private lazy var usageClient = CodexUsageClient(
@@ -53,27 +62,32 @@ final class AppModel: ObservableObject {
         onStatus: { [weak self] status in
             self?.usageStatus = status
         },
-        onThreadSnapshot: { [weak self] states in
-            self?.replaceThreadStates(states)
+        onThreadSnapshot: { [weak self] activities in
+            self?.replaceThreadActivities(activities)
         },
-        onThreadState: { [weak self] threadID, state in
-            self?.applyThreadState(state, to: threadID)
+        onThreadActivity: { [weak self] threadID, activity in
+            self?.applyThreadActivity(activity, to: threadID)
+        },
+        onThreadObservation: { [weak self] threadID, observation in
+            self?.applyThreadObservation(observation, to: threadID)
         },
         onThreadReset: { [weak self] in
             self?.resetThreadStates()
         }
     )
 
-    private lazy var desktopStatusClient = CodexDesktopStatusClient { [weak self] states in
-        self?.replaceDesktopStates(states)
+    private lazy var desktopStatusClient = CodexDesktopStatusClient { [weak self] activities in
+        self?.replaceDesktopActivities(activities)
     }
 
     init(
         taskRepository: LocalTaskRepository = LocalTaskRepository(),
-        remoteTaskRepository: RemoteTaskRepository = RemoteTaskRepository()
+        remoteTaskRepository: RemoteTaskRepository = RemoteTaskRepository(),
+        alertLedger: CodexApprovalAlertLedger = CodexApprovalAlertLedger()
     ) {
         self.taskRepository = taskRepository
         self.remoteTaskRepository = remoteTaskRepository
+        self.alertLedger = alertLedger
     }
 
     var runningCount: Int {
@@ -139,9 +153,6 @@ final class AppModel: ObservableObject {
             localRepositoryTasks = Dictionary(
                 uniqueKeysWithValues: loaded.map { ($0.identityKey, $0) }
             )
-            desktopStatusClient.refresh(
-                threadIDs: loaded.filter(\.state.isLive).map(\.id)
-            )
             taskError = nil
             refreshedAtLeastOneSource = true
         } catch {
@@ -162,6 +173,13 @@ final class AppModel: ObservableObject {
         repositoryTasks = localRepositoryTasks
         repositoryTasks.merge(remoteRepositoryTasks) { _, latest in latest }
         taskCache.merge(repositoryTasks) { _, latest in latest }
+
+        let probeTargets = repositoryTasks.values.compactMap { task -> CodexThreadProbeTarget? in
+            let wasLive = effectiveStates[task.identityKey]?.isLive == true
+            guard task.state.isLive || wasLive else { return nil }
+            return CodexThreadProbeTarget(threadID: task.id, hostID: task.hostID)
+        }
+        desktopStatusClient.refresh(targets: probeTargets)
         rebuildVisibleTasks(emitCompletions: hasRepositoryBaseline)
 
         if refreshedAtLeastOneSource {
@@ -261,7 +279,9 @@ final class AppModel: ObservableObject {
                     title: "确认发布前的权限请求",
                     workspacePath: "/Users/demo/Projects/notch-dashboard",
                     updatedAt: now,
-                    state: .needsAttention
+                    state: .needsAttention,
+                    attentionReason: .structuredApproval,
+                    attentionSignalID: "preview-approval"
                 ),
                 Self.previewTask(
                     id: "019-preview-04",
@@ -317,17 +337,17 @@ final class AppModel: ObservableObject {
         tasks.sort(by: Self.displayOrder)
     }
 
-    private func replaceThreadStates(_ states: [String: CodexTaskState]) {
-        serverStates = Dictionary(uniqueKeysWithValues: states.map {
+    private func replaceThreadActivities(_ activities: [String: CodexTaskActivity]) {
+        serverActivities = Dictionary(uniqueKeysWithValues: activities.map {
             (Self.localIdentityKey(for: $0.key), $0.value)
         })
         rebuildVisibleTasks(emitCompletions: hasServerBaseline)
         hasServerBaseline = true
     }
 
-    private func applyThreadState(_ state: CodexTaskState, to threadID: String) {
+    private func applyThreadActivity(_ activity: CodexTaskActivity, to threadID: String) {
         let taskKey = Self.localIdentityKey(for: threadID)
-        serverStates[taskKey] = state
+        serverActivities[taskKey] = activity
         if taskCache[taskKey] == nil {
             refreshTasks()
         } else {
@@ -336,15 +356,26 @@ final class AppModel: ObservableObject {
     }
 
     private func resetThreadStates() {
-        serverStates.removeAll()
+        serverActivities.removeAll()
+        threadReadsInFlight.removeAll()
         hasServerBaseline = false
         rebuildVisibleTasks(emitCompletions: false)
     }
 
-    private func replaceDesktopStates(_ states: [String: CodexTaskState]) {
-        desktopStates = Dictionary(uniqueKeysWithValues: states.map {
-            (Self.localIdentityKey(for: $0.key), $0.value)
-        })
+    private func replaceDesktopActivities(_ activities: [String: CodexTaskActivity]) {
+        desktopActivities = activities
+        rebuildVisibleTasks(emitCompletions: hasRepositoryBaseline)
+    }
+
+    private func applyThreadObservation(
+        _ observation: CodexThreadObservation?,
+        to threadID: String
+    ) {
+        threadReadsInFlight.remove(threadID)
+        guard let observation else { return }
+
+        let taskKey = Self.localIdentityKey(for: threadID)
+        serverActivities[taskKey] = observation.activity
         rebuildVisibleTasks(emitCompletions: hasRepositoryBaseline)
     }
 
@@ -352,12 +383,22 @@ final class AppModel: ObservableObject {
         let now = Date()
         removeExpiredTransientStates(at: now)
 
+        var nextActivities: [String: CodexTaskActivity] = [:]
         var nextStates: [String: CodexTaskState] = [:]
-        for (taskKey, _) in taskCache {
-            let repositoryState = repositoryTasks[taskKey]?.state ?? .inactive
-            nextStates[taskKey] = desktopStates[taskKey]
-                ?? serverStates[taskKey]
-                ?? repositoryState
+        for (taskKey, cachedTask) in taskCache {
+            let repositoryTask = repositoryTasks[taskKey] ?? cachedTask
+            let repositoryActivity = CodexTaskActivity(
+                state: repositoryTask.state,
+                attentionReason: repositoryTask.attentionReason,
+                signalID: repositoryTask.attentionSignalID
+            )
+            let activity = Self.preferredActivity(
+                desktop: desktopActivities[taskKey],
+                server: serverActivities[taskKey],
+                repository: repositoryActivity
+            )
+            nextActivities[taskKey] = activity
+            nextStates[taskKey] = activity.state
         }
 
         var detectedCompletion = false
@@ -368,6 +409,13 @@ final class AppModel: ObservableObject {
                     from: previousState,
                     to: nextState
                 ) else { continue }
+
+                if let task = taskCache[taskKey],
+                   !task.isRemote,
+                   threadReadsInFlight.insert(task.id).inserted,
+                   !usageClient.readThread(task.id) {
+                    threadReadsInFlight.remove(task.id)
+                }
                 showCompletion(for: taskKey, now: now)
                 detectedCompletion = true
             }
@@ -377,9 +425,9 @@ final class AppModel: ObservableObject {
             removeTransientState(for: taskKey)
         }
 
-        let liveTasks = nextStates.compactMap { taskKey, state -> CodexTask? in
-            guard state.isLive, let task = taskCache[taskKey] else { return nil }
-            return task.withState(state)
+        let liveTasks = nextActivities.compactMap { taskKey, activity -> CodexTask? in
+            guard activity.state.isLive, let task = taskCache[taskKey] else { return nil }
+            return task.withActivity(activity)
         }
 
         let transientTasks = transientStates.compactMap { taskKey, transient -> CodexTask? in
@@ -389,10 +437,46 @@ final class AppModel: ObservableObject {
         }
 
         tasks = (liveTasks + transientTasks).sorted(by: Self.displayOrder)
+        emitApprovalAlerts(from: tasks, notify: hasRepositoryBaseline)
         effectiveStates = nextStates
         if detectedCompletion {
             completionPulseSequence &+= 1
         }
+    }
+
+    private func emitApprovalAlerts(from tasks: [CodexTask], notify: Bool) {
+        for task in tasks {
+            guard let reason = task.attentionReason, reason.shouldAlert else { continue }
+            let rawSignalID = task.attentionSignalID
+                ?? "fallback:\(Int(task.updatedAt.timeIntervalSince1970 * 1_000))"
+            let signalID = "\(task.identityKey):\(reason.rawValue):\(rawSignalID)"
+            guard alertLedger.markIfNew(signalID) else { continue }
+            guard notify else { continue }
+            latestApprovalAlert = CodexApprovalAlert(
+                id: signalID,
+                task: task,
+                reason: reason
+            )
+        }
+    }
+
+    private static func preferredActivity(
+        desktop: CodexTaskActivity?,
+        server: CodexTaskActivity?,
+        repository: CodexTaskActivity
+    ) -> CodexTaskActivity {
+        let candidates = [desktop, server, repository].compactMap { $0 }
+        if let structured = candidates.first(where: {
+            $0.attentionReason == .structuredApproval
+        }) {
+            return structured
+        }
+        if let textual = candidates.first(where: {
+            $0.attentionReason == .textualApproval
+        }) {
+            return textual
+        }
+        return desktop ?? server ?? repository
     }
 
     private func showCompletion(for threadID: String, now: Date) {
@@ -473,6 +557,8 @@ final class AppModel: ObservableObject {
         workspacePath: String,
         updatedAt: Date,
         state: CodexTaskState,
+        attentionReason: CodexAttentionReason? = nil,
+        attentionSignalID: String? = nil,
         hostID: String = "local",
         deviceName: String = "MacBook"
     ) -> CodexTask {
@@ -488,7 +574,9 @@ final class AppModel: ObservableObject {
             updatedAt: updatedAt,
             tokensUsed: 0,
             isPinned: false,
-            state: state
+            state: state,
+            attentionReason: attentionReason,
+            attentionSignalID: attentionSignalID
         )
     }
 }

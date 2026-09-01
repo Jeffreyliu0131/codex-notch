@@ -17,7 +17,8 @@ struct NotchRootView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var presentation: PanelPresentation
     let profile: ScreenProfile
-    let onExpansionRequest: (Bool) -> Void
+    let onHoverChange: (Bool) -> Void
+    let onToggleRequest: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var lensWidth: CGFloat {
@@ -62,9 +63,7 @@ struct NotchRootView: View {
                 y: presentation.isExpanded ? 5 : 3
             )
             .contentShape(Rectangle())
-            .onTapGesture {
-                onExpansionRequest(!presentation.isExpanded)
-            }
+            .onTapGesture(perform: onToggleRequest)
 
             if presentation.isExpanded {
                 DashboardContentView(model: model)
@@ -77,7 +76,7 @@ struct NotchRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onHover(perform: onExpansionRequest)
+        .onHover(perform: onHoverChange)
         .animation(
             reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86),
             value: presentation.isExpanded
@@ -506,6 +505,11 @@ private struct ProjectTaskRow: View {
         }
     }
 
+    private var statusName: String {
+        if task.attentionReason?.shouldAlert == true { return "待批准" }
+        return task.state.displayName
+    }
+
     private var rowBackground: Color {
         if isUnseenCompletion {
             return .codexBlue.opacity(openHovering ? 0.115 : 0.065)
@@ -600,7 +604,7 @@ private struct ProjectTaskRow: View {
                                     .fill(statusTint)
                                     .frame(width: 5, height: 5)
                             }
-                            Text(task.state.displayName)
+                            Text(statusName)
                                 .font(.system(size: 9.5, weight: .medium))
                                 .lineLimit(1)
                         }
@@ -628,7 +632,7 @@ private struct ProjectTaskRow: View {
             .accessibilityValue(
                 isUnseenCompletion
                     ? "\(task.deviceName)，已完成，未查看"
-                    : "\(task.deviceName)，\(task.state.displayName)"
+                    : "\(task.deviceName)，\(statusName)"
                         + (isViewedCompletion ? "，已查看" : "")
             )
             .accessibilityHint(

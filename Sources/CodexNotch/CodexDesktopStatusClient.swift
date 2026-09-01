@@ -4,52 +4,55 @@ import Foundation
 
 @MainActor
 final class CodexDesktopStatusClient {
-    typealias SnapshotHandler = @MainActor ([String: CodexTaskState]) -> Void
+    typealias SnapshotHandler = @MainActor ([String: CodexTaskActivity]) -> Void
 
     private let onSnapshot: SnapshotHandler
     private let workerQueue = DispatchQueue(label: "com.example.codexnotch.desktop-status")
     private let refreshInterval: TimeInterval = 5
-    private var requestedThreadIDs: [String] = []
-    private var inFlightThreadIDs: [String]?
+    private var requestedTargets: [CodexThreadProbeTarget] = []
+    private var inFlightTargets: [CodexThreadProbeTarget]?
     private var lastStartedAt = Date.distantPast
 
     init(onSnapshot: @escaping SnapshotHandler) {
         self.onSnapshot = onSnapshot
     }
 
-    func refresh(threadIDs: [String]) {
-        let normalized = Array(Set(threadIDs)).sorted()
-        let changed = normalized != requestedThreadIDs
-        requestedThreadIDs = normalized
+    func refresh(targets: [CodexThreadProbeTarget]) {
+        let normalized = Array(Set(targets)).sorted {
+            if $0.hostID != $1.hostID { return $0.hostID < $1.hostID }
+            return $0.threadID < $1.threadID
+        }
+        let changed = normalized != requestedTargets
+        requestedTargets = normalized
 
         guard !normalized.isEmpty else {
             onSnapshot([:])
             return
         }
-        guard inFlightThreadIDs == nil else { return }
+        guard inFlightTargets == nil else { return }
         guard changed || Date().timeIntervalSince(lastStartedAt) >= refreshInterval else { return }
 
         startRefresh(for: normalized)
     }
 
     func stop() {
-        requestedThreadIDs = []
-        inFlightThreadIDs = nil
+        requestedTargets = []
+        inFlightTargets = nil
     }
 
-    private func startRefresh(for threadIDs: [String]) {
-        inFlightThreadIDs = threadIDs
+    private func startRefresh(for targets: [CodexThreadProbeTarget]) {
+        inFlightTargets = targets
         lastStartedAt = Date()
 
         workerQueue.async { [weak self] in
-            let snapshot = (try? CodexDesktopIPCSession().fetchStates(for: threadIDs)) ?? [:]
+            let snapshot = (try? CodexDesktopIPCSession().fetchActivities(for: targets)) ?? [:]
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.inFlightThreadIDs = nil
-                if self.requestedThreadIDs == threadIDs {
+                self.inFlightTargets = nil
+                if self.requestedTargets == targets {
                     self.onSnapshot(snapshot)
-                } else if !self.requestedThreadIDs.isEmpty {
-                    self.startRefresh(for: self.requestedThreadIDs)
+                } else if !self.requestedTargets.isEmpty {
+                    self.startRefresh(for: self.requestedTargets)
                 }
             }
         }
@@ -69,7 +72,8 @@ private final class CodexDesktopIPCSession {
     private let socketPath: String
     private var descriptor: Int32 = -1
     private var clientID = "initializing-client"
-    private var receivedStates: [String: CodexTaskState] = [:]
+    private var receivedActivities: [String: CodexTaskActivity] = [:]
+    private var activeTarget: CodexThreadProbeTarget?
 
     init(
         codexHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
@@ -83,14 +87,18 @@ private final class CodexDesktopIPCSession {
         }
     }
 
-    func fetchStates(for threadIDs: [String]) throws -> [String: CodexTaskState] {
+    func fetchActivities(
+        for targets: [CodexThreadProbeTarget]
+    ) throws -> [String: CodexTaskActivity] {
         try connect()
         try initialize()
 
-        for threadID in threadIDs {
-            try? fetchState(for: threadID)
+        for target in targets {
+            activeTarget = target
+            try? fetchActivity(for: target)
         }
-        return receivedStates
+        activeTarget = nil
+        return receivedActivities
     }
 
     private func connect() throws {
@@ -169,10 +177,10 @@ private final class CodexDesktopIPCSession {
         clientID = assignedID
     }
 
-    private func fetchState(for threadID: String) throws {
+    private func fetchActivity(for target: CodexThreadProbeTarget) throws {
         let ownerResponse = try request(
             method: "thread-owner-discovery",
-            params: ["hostId": "local", "conversationId": threadID],
+            params: ["hostId": target.hostID, "conversationId": target.threadID],
             version: 1,
             timeoutMilliseconds: 3_000
         )
@@ -187,8 +195,8 @@ private final class CodexDesktopIPCSession {
             "sourceClientId": clientID,
             "targetClientIds": [ownerID],
             "params": [
-                "conversationId": threadID,
-                "hostId": "local",
+                "conversationId": target.threadID,
+                "hostId": target.hostID,
                 "following": true
             ],
             "version": 1
@@ -197,7 +205,7 @@ private final class CodexDesktopIPCSession {
 
         _ = try request(
             method: "thread-follower-load-complete-history",
-            params: ["conversationId": threadID],
+            params: ["conversationId": target.threadID],
             version: 1,
             targetClientID: ownerID,
             timeoutMilliseconds: 7_000
@@ -209,8 +217,8 @@ private final class CodexDesktopIPCSession {
             "sourceClientId": clientID,
             "targetClientIds": [ownerID],
             "params": [
-                "conversationId": threadID,
-                "hostId": "local",
+                "conversationId": target.threadID,
+                "hostId": target.hostID,
                 "following": false
             ],
             "version": 1
@@ -282,18 +290,22 @@ private final class CodexDesktopIPCSession {
               let threadID = params["conversationId"] as? String,
               let change = params["change"] as? [String: Any],
               change["type"] as? String == "snapshot",
-              let conversation = change["conversationState"] as? [String: Any],
-              let status = conversation["threadRuntimeStatus"] as? [String: Any] else {
+              let conversation = change["conversationState"] as? [String: Any] else {
             return
         }
 
-        let type = status["type"] as? String ?? "notLoaded"
-        guard type != "notLoaded" else { return }
-        let flags = status["activeFlags"] as? [String] ?? []
-        receivedStates[threadID] = CodexTaskState.appServerStatus(
-            type: type,
-            activeFlags: flags
+        let hostID = params["hostId"] as? String
+            ?? conversation["hostId"] as? String
+            ?? activeTarget?.hostID
+            ?? "local"
+        let observation = CodexThreadObservationParser.desktopConversation(
+            conversation,
+            fallbackThreadID: threadID,
+            fallbackHostID: hostID
         )
+        guard observation.activity.state != .inactive
+                || observation.activity.attentionReason == .textualApproval else { return }
+        receivedActivities[observation.identityKey] = observation.activity
     }
 
     private func send(_ message: [String: Any]) throws {

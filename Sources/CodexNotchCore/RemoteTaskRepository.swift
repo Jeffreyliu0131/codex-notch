@@ -133,6 +133,11 @@ public final class RemoteTaskRepository {
         let updatedSeconds = updatedValue > 100_000_000_000
             ? updatedValue / 1_000
             : updatedValue
+        let activity = CodexTaskActivity.appServerStatus(
+            type: statusType,
+            activeFlags: activeFlags,
+            signalID: "remote-runtime:\(updatedValue)"
+        )
 
         return CodexTask(
             id: conversationID,
@@ -147,10 +152,9 @@ public final class RemoteTaskRepository {
             updatedAt: Date(timeIntervalSince1970: updatedSeconds),
             tokensUsed: 0,
             isPinned: false,
-            state: CodexTaskState.appServerStatus(
-                type: statusType,
-                activeFlags: activeFlags
-            )
+            state: activity.state,
+            attentionReason: activity.attentionReason,
+            attentionSignalID: activity.signalID
         )
     }
 

@@ -4,7 +4,7 @@ public final class RolloutTaskStateReader {
     private struct CacheEntry {
         let fileSize: UInt64
         let modifiedAt: Date?
-        let state: CodexTaskState?
+        let activity: CodexTaskActivity?
     }
 
     private let fileManager: FileManager
@@ -16,6 +16,10 @@ public final class RolloutTaskStateReader {
     }
 
     public func state(atPath path: String) -> CodexTaskState? {
+        activity(atPath: path)?.state
+    }
+
+    public func activity(atPath path: String) -> CodexTaskActivity? {
         guard !path.isEmpty,
               let attributes = try? fileManager.attributesOfItem(atPath: path),
               let sizeNumber = attributes[.size] as? NSNumber else {
@@ -27,22 +31,25 @@ public final class RolloutTaskStateReader {
         if let cached = cache[path],
            cached.fileSize == fileSize,
            cached.modifiedAt == modifiedAt {
-            return cached.state
+            return cached.activity
         }
 
-        let state = readLatestLifecycleState(
+        let activity = readLatestLifecycleActivity(
             from: URL(fileURLWithPath: path),
             fileSize: fileSize
         )
         cache[path] = CacheEntry(
             fileSize: fileSize,
             modifiedAt: modifiedAt,
-            state: state
+            activity: activity
         )
-        return state
+        return activity
     }
 
-    private func readLatestLifecycleState(from url: URL, fileSize: UInt64) -> CodexTaskState? {
+    private func readLatestLifecycleActivity(
+        from url: URL,
+        fileSize: UInt64
+    ) -> CodexTaskActivity? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
@@ -62,8 +69,8 @@ public final class RolloutTaskStateReader {
                 while let newline = combined.lastIndex(of: 0x0A) {
                     let lineStart = combined.index(after: newline)
                     if lineStart < combined.endIndex,
-                       let state = lifecycleState(from: combined[lineStart...]) {
-                        return state
+                       let activity = lifecycleActivity(from: combined[lineStart...]) {
+                        return activity
                     }
                     combined.removeSubrange(newline...)
                 }
@@ -74,10 +81,10 @@ public final class RolloutTaskStateReader {
             }
         }
 
-        return suffix.isEmpty ? nil : lifecycleState(from: suffix[...])
+        return suffix.isEmpty ? nil : lifecycleActivity(from: suffix[...])
     }
 
-    private func lifecycleState(from line: Data.SubSequence) -> CodexTaskState? {
+    private func lifecycleActivity(from line: Data.SubSequence) -> CodexTaskActivity? {
         guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
               let record = object as? [String: Any],
               record["type"] as? String == "event_msg",
@@ -88,9 +95,18 @@ public final class RolloutTaskStateReader {
 
         switch type {
         case "task_started":
-            return .running
+            return CodexTaskActivity(state: .running)
         case "task_complete":
-            return .inactive
+            if let message = payload["last_agent_message"] as? String,
+               CodexApprovalTextClassifier.isApprovalRequest(message) {
+                let timestamp = record["timestamp"] as? String ?? "task-complete"
+                return CodexTaskActivity(
+                    state: .needsAttention,
+                    attentionReason: .textualApproval,
+                    signalID: "rollout:\(timestamp)"
+                )
+            }
+            return CodexTaskActivity(state: .inactive)
         default:
             return nil
         }

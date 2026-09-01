@@ -103,7 +103,8 @@ private struct ExpandedPreviewCanvas: View {
                 model: model,
                 presentation: presentation,
                 profile: profile,
-                onExpansionRequest: { _ in }
+                onHoverChange: { _ in },
+                onToggleRequest: {}
             )
             .environment(\.glassBlendingMode, .withinWindow)
             .frame(
@@ -132,7 +133,8 @@ private struct CollapsedPreviewCanvas: View {
                 model: model,
                 presentation: presentation,
                 profile: profile,
-                onExpansionRequest: { _ in }
+                onHoverChange: { _ in },
+                onToggleRequest: {}
             )
             .environment(\.glassBlendingMode, .withinWindow)
             .frame(
