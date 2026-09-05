@@ -37,6 +37,10 @@ final class AppModel: ObservableObject {
 
     private let taskRepository: LocalTaskRepository
     private let remoteTaskRepository: RemoteTaskRepository
+    private lazy var snapshotLoader = TaskSnapshotLoader(local: taskRepository, remote: remoteTaskRepository)
+    private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
+    @Published private(set) var taskDataIsStale = true
     private var taskTimer: Timer?
     private var usageTimer: Timer?
     private var repositoryTasks: [String: CodexTask] = [:]
@@ -128,6 +132,9 @@ final class AppModel: ObservableObject {
     }
 
     func stop() {
+        refreshGeneration += 1
+        refreshTask?.cancel()
+        refreshTask = nil
         taskTimer?.invalidate()
         usageTimer?.invalidate()
         taskTimer = nil
@@ -146,29 +153,39 @@ final class AppModel: ObservableObject {
     }
 
     func refreshTasks() {
-        var refreshedAtLeastOneSource = false
+        if let lastRefresh, Date().timeIntervalSince(lastRefresh) > 10 { taskDataIsStale = true }
+        guard refreshTask == nil else { return }
+        let generation = refreshGeneration
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if generation == refreshGeneration { refreshTask = nil } }
+            do {
+                let snapshot = try await snapshotLoader.load()
+                guard !Task.isCancelled, generation == refreshGeneration else { return }
+                applySnapshot(snapshot)
+            } catch {
+                if !Task.isCancelled, generation == refreshGeneration { taskDataIsStale = true }
+            }
+        }
+    }
 
-        do {
-            let loaded = try taskRepository.loadTasks(limit: 50)
-            localRepositoryTasks = Dictionary(
-                uniqueKeysWithValues: loaded.map { ($0.identityKey, $0) }
-            )
+    private func applySnapshot(_ snapshot: TaskRepositorySnapshot) {
+        var refreshedAtLeastOneSource = false
+        switch snapshot.local {
+        case .success(let loaded):
+            localRepositoryTasks = Dictionary(loaded.map { ($0.identityKey, $0) }, uniquingKeysWith: { _, latest in latest })
             taskError = nil
             refreshedAtLeastOneSource = true
-        } catch {
-            taskError = error.localizedDescription
+        case .failure(let error): taskError = error.localizedDescription
         }
-
-        do {
-            let loaded = try remoteTaskRepository.loadTasks(limitPerHost: 50)
-            remoteRepositoryTasks = Dictionary(
-                uniqueKeysWithValues: loaded.map { ($0.identityKey, $0) }
-            )
+        switch snapshot.remote {
+        case .success(let loaded):
+            remoteRepositoryTasks = Dictionary(loaded.map { ($0.identityKey, $0) }, uniquingKeysWith: { _, latest in latest })
             remoteTaskError = nil
             refreshedAtLeastOneSource = true
-        } catch {
-            remoteTaskError = error.localizedDescription
+        case .failure(let error): remoteTaskError = error.localizedDescription
         }
+        taskDataIsStale = taskError != nil || remoteTaskError != nil
 
         repositoryTasks = localRepositoryTasks
         repositoryTasks.merge(remoteRepositoryTasks) { _, latest in latest }

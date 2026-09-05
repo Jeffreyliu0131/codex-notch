@@ -140,3 +140,13 @@ Product behavior was informed by publicly observable ideas from:
 ## License and reuse
 
 No `LICENSE` file is currently provided. Copyright is retained, and this review snapshot does not grant permission to copy, modify, distribute, sublicense, or reuse the code. A license decision must be made separately before presenting the project as open source.
+
+## Audit follow-through · 2026-09-05
+
+The primary job is noticing actionable task changes without repeated checking. Repository reads now run on a dedicated actor, with a single in-flight UI refresh, cancellation/generation checks that discard late results, and a bounded SQLite subprocess timeout. Stale snapshots are explicitly labeled; no task text or content telemetry was added. These changes are local to the public snapshot and are not yet exported into the separately owned runtime source.
+
+Next evaluation: in an explicitly authorized local session, compare manual checking with the companion over matched synthetic task sequences. Record missed approvals, duplicate/false alerts, time to notice an actionable event, deliberate interruptions, and source-staleness recovery. Keep event IDs synthetic and collect no prompt text. Test source-format changes and unavailable IPC before claiming compatibility with another installed version. Live compatibility and external adoption remain unverified.
+
+Local acceptance: synthetic timeout/repository tests, Swift build and self-test. Release/install/profile actions are separate and have not run as part of this audit repair.
+
+Local verification on 2026-09-05: 13 Swift tests (including a synthetic slow-query deadline) and 41 self-checks passed. Local Codex database integration remained disabled.

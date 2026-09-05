@@ -5,6 +5,7 @@ public enum LocalTaskRepositoryError: LocalizedError {
     case sqliteUnavailable
     case queryFailed(String)
     case invalidResponse
+    case queryTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +15,8 @@ public enum LocalTaskRepositoryError: LocalizedError {
             return "系统缺少 sqlite3"
         case .queryFailed(let detail):
             return detail.isEmpty ? "读取 Codex 任务失败" : detail
+        case .queryTimedOut:
+            return "读取任务超时，显示的是上次成功读取的状态"
         case .invalidResponse:
             return "Codex 任务数据格式无法识别"
         }
@@ -24,13 +27,19 @@ public final class LocalTaskRepository {
     private let databaseURL: URL
     private let locksURL: URL
     private let fileManager: FileManager
+    private let queryTimeout: TimeInterval
+    private let sqliteExecutable: URL
     private let lifecycleReader: RolloutTaskStateReader
 
     public init(
         codexHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
         fileManager: FileManager = .default,
-        lifecycleReader: RolloutTaskStateReader? = nil
+        lifecycleReader: RolloutTaskStateReader? = nil,
+        queryTimeout: TimeInterval = 2,
+        sqliteExecutable: URL = URL(fileURLWithPath: "/usr/bin/sqlite3")
     ) {
+        self.queryTimeout = min(max(queryTimeout, 0.05), 10)
+        self.sqliteExecutable = sqliteExecutable
         self.databaseURL = codexHome.appendingPathComponent("state_5.sqlite")
         self.locksURL = codexHome.appendingPathComponent("thread-writer-locks", isDirectory: true)
         self.fileManager = fileManager
@@ -41,7 +50,7 @@ public final class LocalTaskRepository {
         guard fileManager.fileExists(atPath: databaseURL.path) else {
             throw LocalTaskRepositoryError.databaseMissing(databaseURL.path)
         }
-        guard fileManager.isExecutableFile(atPath: "/usr/bin/sqlite3") else {
+        guard fileManager.isExecutableFile(atPath: sqliteExecutable.path) else {
             throw LocalTaskRepositoryError.sqliteUnavailable
         }
 
@@ -70,7 +79,7 @@ public final class LocalTaskRepository {
         let process = Process()
         let output = Pipe()
         let errors = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.executableURL = sqliteExecutable
         process.arguments = ["-readonly", "-json", databaseURL.path, query]
         process.standardOutput = output
         process.standardError = errors
@@ -81,10 +90,19 @@ public final class LocalTaskRepository {
             throw LocalTaskRepositoryError.queryFailed(error.localizedDescription)
         }
 
+        // A bounded watchdog also breaks a blocked pipe read. No UI thread waits.
+        let deadline = DispatchWorkItem {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + queryTimeout, execute: deadline)
+        defer { deadline.cancel() }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let errorData = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
+        if process.terminationReason == .uncaughtSignal && process.terminationStatus == SIGKILL {
+            throw LocalTaskRepositoryError.queryTimedOut
+        }
         guard process.terminationStatus == 0 else {
             let detail = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

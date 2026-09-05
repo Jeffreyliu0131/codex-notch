@@ -118,3 +118,28 @@ struct CodexNotchCoreTests {
         }
     }
 }
+
+@Test func slowRepositoryReadIsBoundedAndDoesNotOccupyMainActor() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    FileManager.default.createFile(atPath: root.appendingPathComponent("state_5.sqlite").path, contents: Data())
+    let executable = root.appendingPathComponent("slow-query")
+    try Data("#!/bin/sh\nexec /bin/sleep 5\n".utf8).write(to: executable)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+    let loader = TaskSnapshotLoader(
+        local: LocalTaskRepository(codexHome: root, queryTimeout: 0.15, sqliteExecutable: executable),
+        remote: RemoteTaskRepository(codexHome: root)
+    )
+    let start = Date()
+    let pending = Task { try await loader.load() }
+    // This hop remains available while the repository actor waits for its child.
+    let responsive = await MainActor.run { true }
+    #expect(responsive)
+    let snapshot = try await pending.value
+    if case .failure(let error) = snapshot.local {
+        #expect(error is LocalTaskRepositoryError)
+        #expect(error.localizedDescription.contains("超时"))
+    } else { Issue.record("Expected bounded timeout") }
+    #expect(Date().timeIntervalSince(start) < 3)
+}

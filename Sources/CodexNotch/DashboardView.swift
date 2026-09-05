@@ -369,6 +369,7 @@ struct DashboardContentView: View {
     private var summaryText: String {
         let activeProjects = projectGroups.lazy.filter { $0.liveTaskCount > 0 }.count
         let liveTasks = model.tasks.lazy.filter { $0.state.isLive }.count
+        if model.taskDataIsStale { return "状态待更新 · 正在显示上次读取结果" }
         if model.failureCount > 0 {
             return "\(activeProjects) 个项目 · \(model.failureCount) 项出错"
         }
