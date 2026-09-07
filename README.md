@@ -6,21 +6,23 @@ Codex Notch is an experimental native macOS companion that turns the display not
 
 > **Review status.** This is a public portfolio snapshot. No open-source license has been granted; see [License and reuse](#license-and-reuse).
 
+Current source milestone: [September 7 attention reliability](https://github.com/Jeffreyliu0131/codex-notch/commit/195d750850c74ce03d66ffa564fff94264bc51c8). [GitHub CI](https://github.com/Jeffreyliu0131/codex-notch/actions/workflows/ci.yml) verifies synthetic behavior and builds; live notification delivery remains unverified.
+
 ## Ownership and evidence boundary
 
 This is an independent experimental project. I defined the low-interruption status experience, task-state model, privacy boundary, synthetic QA approach, and safe installation behavior. AI coding agents supported implementation and review under my direction; I reviewed changes and verified the public snapshot with synthetic data and CI.
 
 The project depends on undocumented local Codex implementation details and may require adaptation after product updates. It demonstrates native product prototyping and systems reasoning, not external adoption or an official OpenAI integration.
 
-This public release was reconciled from the locally validated runtime source at `CodexNotch@4f9e514` (2026-09-01). The public repository keeps an independent, safety-reviewed history instead of mirroring the runtime working directory.
+The initial public baseline was reconciled from runtime source `CodexNotch@4f9e514` on 2026-09-01. The September 5 and September 7 changes were made independently in this public snapshot; they have not updated the separate local runtime or installed application. The public repository has its own Git history.
 
 ## What it demonstrates
 
 - A low-interruption notch lens that expands into a native task dashboard.
-- Local, approval-required, other-input, failed, recently completed, and connected-Mac task states.
+- Local and connected-Mac tasks with approval-required, other-input, failed, recently completed, and explicit unknown states. Unknown status stays visible without claiming completion.
 - Explicit approval detection across structured runtime flags, local thread snapshots, and rollout fallback signals.
-- An eight-second notch expansion plus a silent macOS notification when an approval is required and Codex is not frontmost.
-- Alert deduplication that avoids replaying the same approval signal after refreshes or relaunches.
+- An eight-second notch expansion for eligible new approval signals, plus a conditional silent system-notification request after permission, foreground and source-freshness checks.
+- Detection deduplication across refreshes/relaunches, a queue for approvals received while notification permission is unresolved, and visible submission outcomes without claiming delivery or reading.
 - Project grouping across Git worktrees and ordinary folders.
 - Weekly quota status through the locally installed Codex App Server.
 - A menu-bar fallback for Macs without a display notch.
@@ -46,7 +48,7 @@ Codex local state / rollout files / local IPC / local App Server
 The project keeps data acquisition, normalized domain state, application coordination, and presentation in separate targets and types:
 
 - `CodexNotchCore` contains task models, grouping rules, quota parsing, approval classification, alert deduplication, retention rules, and read-only local repositories.
-- `CodexNotch` owns lifecycle coordination, local IPC, the Codex App Server subprocess, SwiftUI views, AppKit presentation, and macOS notification delivery.
+- `CodexNotch` owns lifecycle coordination, local IPC, the Codex App Server subprocess, SwiftUI views, AppKit presentation, and macOS notification submission.
 - `CodexNotchSelfTest` exercises synthetic fixtures by default. Reading a real local Codex database is an explicit opt-in integration check.
 
 ## Requirements
@@ -156,6 +158,6 @@ Local verification on 2026-09-05: 13 Swift tests (including a synthetic slow-que
 
 Unknown or missing runtime status types are shown as **状态未知**, stay visible without triggering approval alerts, and cannot by themselves produce a completion pulse. Recognized idle behavior is unchanged. Ordinary user-input waits remain visible without proactive system notifications; explicit approval signals keep the existing alert policy.
 
-The approval ledger records detection deduplication, not delivery or reading. While notification authorization is unresolved, a bounded-age in-memory queue retains distinct task signals instead of only the latest one. Before submission it drops superseded, resolved or older-than-two-minute signals and checks source freshness and foreground state. The UI distinguishes denied permission, foreground suppression, failed request and system acceptance; acceptance never claims delivery or reading. A request completing after the approval changes requests notification removal. No notification text or new lifecycle telemetry is persisted.
+The approval ledger records detection deduplication, not delivery or reading. While notification authorization is unresolved, a bounded-age in-memory queue retains distinct task signals instead of only the latest one. Before submission it drops superseded, resolved or older-than-two-minute signals and checks source freshness and foreground state. The UI distinguishes denied permission, foreground suppression, failed request and system acceptance; acceptance never claims delivery or reading. A request completing after the approval changes requests notification removal. The app adds no persisted notification text or lifecycle telemetry; system notification retention is managed by macOS.
 
-This iteration is owned by the public snapshot. It has not been ported to the independent local runtime, installed, or verified against real Codex conversations. Local validation passed: Swift build, 16 Swift Testing cases, 41 synthetic self-checks, and an off-screen unknown-state preview. A fresh temporary scratch/cache path avoided stale compiler artifacts from the old desktop symlink; no installed toolchain or existing cache was replaced. Notification permission/delivery and current installed Codex compatibility were not exercised.
+This iteration is owned by the public snapshot. It has not been ported to the independent local runtime, installed, or verified against real Codex conversations. Local validation passed: Swift build, 16 Swift Testing cases, 41 synthetic self-checks, and an off-screen unknown-state preview. Notification permission/delivery and current installed Codex compatibility were not exercised.
