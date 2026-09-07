@@ -38,6 +38,7 @@ struct NotchRootView: View {
                 activeCount: model.runningCount,
                 attentionCount: model.attentionCount,
                 failureCount: model.failureCount,
+                unknownCount: model.unknownCount,
                 completionPulseSequence: model.completionPulseSequence,
                 usage: model.usage,
                 notchGap: profile.notchWidth,
@@ -89,6 +90,7 @@ private struct NotchStatusBar: View {
     let activeCount: Int
     let attentionCount: Int
     let failureCount: Int
+    let unknownCount: Int
     let completionPulseSequence: UInt
     let usage: CodexUsageSnapshot?
     let notchGap: CGFloat
@@ -97,7 +99,7 @@ private struct NotchStatusBar: View {
 
     private var stateTint: Color {
         if failureCount > 0 { return .codexRed }
-        if attentionCount > 0 { return .codexOrange }
+        if attentionCount > 0 || unknownCount > 0 { return .codexOrange }
         if activeCount > 0 { return .codexGreen }
         return .white.opacity(0.28)
     }
@@ -105,6 +107,7 @@ private struct NotchStatusBar: View {
     private var stateTitle: String {
         if failureCount > 0 { return "\(failureCount) 项出错" }
         if attentionCount > 0 { return "\(attentionCount) 项待处理" }
+        if unknownCount > 0 { return "\(unknownCount) 项状态未知" }
         if activeCount > 0 { return "\(activeCount) 个任务" }
         return "Codex"
     }
@@ -115,7 +118,7 @@ private struct NotchStatusBar: View {
             HStack(spacing: 0) {
                 HStack(spacing: 8) {
                     StatusDot(
-                        active: activeCount + attentionCount + failureCount > 0,
+                        active: activeCount + attentionCount + failureCount + unknownCount > 0,
                         tint: stateTint,
                         completionPulseSequence: completionPulseSequence
                     )
@@ -157,6 +160,7 @@ private struct NotchStatusBar: View {
                     activeCount: activeCount,
                     attentionCount: attentionCount,
                     failureCount: failureCount,
+                    unknownCount: unknownCount,
                     completionPulseSequence: completionPulseSequence
                 )
                 .frame(width: sideExtension)
@@ -176,11 +180,12 @@ private struct CompactTaskStatus: View {
     let activeCount: Int
     let attentionCount: Int
     let failureCount: Int
+    let unknownCount: Int
     let completionPulseSequence: UInt
 
     private var stateTint: Color {
         if failureCount > 0 { return .codexRed }
-        if attentionCount > 0 { return .codexOrange }
+        if attentionCount > 0 || unknownCount > 0 { return .codexOrange }
         if activeCount > 0 { return .codexGreen }
         return .white.opacity(0.28)
     }
@@ -188,6 +193,7 @@ private struct CompactTaskStatus: View {
     private var stateTitle: String {
         if failureCount > 0 { return "\(failureCount) 项出错" }
         if attentionCount > 0 { return "\(attentionCount) 项待处理" }
+        if unknownCount > 0 { return "\(unknownCount) 项状态未知" }
         if activeCount > 0 { return "\(activeCount) 个任务" }
         return "Codex"
     }
@@ -195,7 +201,7 @@ private struct CompactTaskStatus: View {
     var body: some View {
         HStack(spacing: 7) {
             StatusDot(
-                active: activeCount + attentionCount + failureCount > 0,
+                active: activeCount + attentionCount + failureCount + unknownCount > 0,
                 tint: stateTint,
                 completionPulseSequence: completionPulseSequence
             )
@@ -278,6 +284,11 @@ struct DashboardContentView: View {
     var body: some View {
         VStack(spacing: 12) {
             header
+            if let status = model.notificationStatus {
+                Text(status).font(.system(size: 11)).foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if model.tasks.isEmpty {
                 EmptyActiveTasksView(message: model.taskError ?? model.remoteTaskError)
@@ -376,6 +387,7 @@ struct DashboardContentView: View {
         if model.attentionCount > 0 {
             return "\(activeProjects) 个项目 · \(model.attentionCount) 项需要你"
         }
+        if model.unknownCount > 0 { return "\(model.unknownCount) 项状态未知 · 来源格式待核对" }
         if model.taskError != nil {
             return "\(activeProjects) 个项目 · 本机同步失败"
         }
@@ -1067,6 +1079,7 @@ private extension CodexTaskState {
         case .needsAttention: return "需要你"
         case .failed: return "出错"
         case .completed: return "已完成"
+        case .unknown: return "状态未知"
         case .inactive: return "待机"
         }
     }
@@ -1077,6 +1090,7 @@ private extension CodexTaskState {
         case .needsAttention: return .codexOrange
         case .failed: return .codexRed
         case .completed: return .codexAccent
+        case .unknown: return .codexOrange
         case .inactive: return .white.opacity(0.38)
         }
     }

@@ -2,6 +2,7 @@ import Foundation
 
 public enum CodexTaskState: String, Equatable, Sendable {
     case inactive
+    case unknown
     case running
     case needsAttention
     case failed
@@ -9,7 +10,7 @@ public enum CodexTaskState: String, Equatable, Sendable {
 
     public var isLive: Bool {
         switch self {
-        case .running, .needsAttention, .failed:
+        case .running, .needsAttention, .failed, .unknown:
             return true
         case .inactive, .completed:
             return false
@@ -22,7 +23,8 @@ public enum CodexTaskState: String, Equatable, Sendable {
         case .failed: return 1
         case .running: return 2
         case .completed: return 3
-        case .inactive: return 4
+        case .unknown: return 4
+        case .inactive: return 5
         }
     }
 
@@ -423,7 +425,8 @@ public struct CodexProjectGroup: Identifiable, Equatable, Sendable {
         case .needsAttention: return 1
         case .failed: return 2
         case .running: return 3
-        case .inactive: return 5
+        case .unknown: return 5
+        case .inactive: return 6
         case .completed: return 0
         }
     }

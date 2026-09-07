@@ -70,8 +70,8 @@ final class MenuBarController: NSObject {
 
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
-        button.title = model.runningCount > 0 ? " \(model.runningCount)" : ""
-        button.contentTintColor = model.runningCount > 0 ? .systemGreen : .labelColor
+        button.title = model.unknownCount > 0 ? " ? \(model.unknownCount)" : model.runningCount > 0 ? " \(model.runningCount)" : ""
+        button.contentTintColor = model.unknownCount > 0 ? .systemOrange : model.runningCount > 0 ? .systemGreen : .labelColor
     }
 
     private func showContextMenu() {

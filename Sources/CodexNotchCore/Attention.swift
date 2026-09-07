@@ -60,7 +60,7 @@ public struct CodexTaskActivity: Equatable, Sendable {
             return CodexTaskActivity(state: .inactive)
 
         default:
-            return CodexTaskActivity(state: .inactive)
+            return CodexTaskActivity(state: .unknown)
         }
     }
 }
@@ -247,7 +247,7 @@ public enum CodexThreadObservationParser {
         let turnID = nonempty(latestTurn?["id"] as? String)
             ?? nonempty(latestTurn?["turnId"] as? String)
         let requestText = flattenedStrings(from: requests).joined(separator: " ")
-        let statusType = status?["type"] as? String ?? "notLoaded"
+        let statusType = status?["type"] as? String ?? "unknown"
         let flags = status?["activeFlags"] as? [String] ?? []
         var activity = CodexTaskActivity.appServerStatus(
             type: statusType,
@@ -396,5 +396,40 @@ public final class CodexApprovalAlertLedger {
         SHA256.hash(data: Data(signalID.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+}
+
+
+public enum CodexApprovalSignal {
+    public static func id(for task: CodexTask) -> String? {
+        guard let reason = task.attentionReason, reason.shouldAlert else { return nil }
+        let raw = task.attentionSignalID ?? "fallback:\(Int(task.updatedAt.timeIntervalSince1970 * 1_000))"
+        return "\(task.identityKey):\(reason.rawValue):\(raw)"
+    }
+}
+
+/// In-memory only. Waiting for notification permission is not notification delivery.
+public struct CodexPendingApprovalQueue {
+    private struct Entry {
+        let taskKey: String
+        let queuedAt: Date
+    }
+    private var entries: [String: Entry] = [:]
+    public init() {}
+    public var count: Int { entries.count }
+
+    public mutating func enqueue(id: String, task: CodexTask, now: Date = Date()) {
+        entries = entries.filter { $0.value.taskKey != task.identityKey }
+        entries[id] = Entry(taskKey: task.identityKey, queuedAt: now)
+    }
+
+    public mutating func drain(activeTasks: [CodexTask], now: Date = Date()) -> [CodexTask] {
+        let ready = activeTasks.filter { task in
+            guard let id = CodexApprovalSignal.id(for: task), let entry = entries[id] else { return false }
+            let age = now.timeIntervalSince(entry.queuedAt)
+            return age >= 0 && age <= 120
+        }
+        entries.removeAll()
+        return ready
     }
 }

@@ -205,4 +205,53 @@ struct ApprovalAttentionTests {
         #expect(!restored.markIfNew("signal-1"))
         #expect(restored.markIfNew("signal-2"))
     }
+
+    @Test
+    func unknownStatusIsVisibleWithoutFalseCompletionOrApproval() {
+        for status in ["futureRuntimeState", ""] {
+            let activity = CodexTaskActivity.appServerStatus(type: status)
+            #expect(activity.state == .unknown)
+            #expect(activity.state.isLive)
+            #expect(activity.attentionReason == nil)
+            #expect(!CodexCompletionRetentionPolicy.shouldBeginRetention(from: .running, to: activity.state))
+        }
+        let missing = CodexThreadObservationParser.appServerThread(["id": "synthetic"], fallbackThreadID: "synthetic")
+        #expect(missing.activity.state == .unknown)
+        #expect(CodexTaskActivity.appServerStatus(type: "idle").state == .inactive)
+    }
+
+    private func pendingTask(_ id: String, host: String = "local", signal: String = "turn-1") -> CodexTask {
+        CodexTask(id: id, hostID: host, title: "Synthetic approval", preview: "", workspacePath: "/synthetic/project", model: "fixture", reasoningEffort: "", updatedAt: Date(timeIntervalSince1970: 100), tokensUsed: 0, isPinned: false, state: .needsAttention, attentionReason: .structuredApproval, attentionSignalID: signal)
+    }
+
+    @Test
+    func authorizationWaitKeepsDistinctTasksAndDropsResolvedOrSupersededSignals() throws {
+        let now = Date(timeIntervalSince1970: 200)
+        let first = pendingTask("same-id")
+        let remote = pendingTask("same-id", host: "remote-synthetic")
+        let resolved = pendingTask("resolved")
+        var queue = CodexPendingApprovalQueue()
+        for task in [first, remote, resolved] {
+            queue.enqueue(id: try #require(CodexApprovalSignal.id(for: task)), task: task, now: now)
+        }
+        #expect(queue.count == 3)
+        let ready = queue.drain(activeTasks: [first, remote, resolved.withState(.running)], now: now.addingTimeInterval(30))
+        #expect(Set(ready.map(\.identityKey)) == Set([first.identityKey, remote.identityKey]))
+        #expect(queue.count == 0)
+        queue.enqueue(id: try #require(CodexApprovalSignal.id(for: first)), task: first, now: now)
+        #expect(queue.drain(activeTasks: [pendingTask("same-id", signal: "turn-2")], now: now).isEmpty)
+    }
+
+    @Test
+    func expiredOrClockReversedPermissionWaitNeverReplays() throws {
+        let now = Date(timeIntervalSince1970: 200)
+        let task = pendingTask("expired")
+        for time in [now.addingTimeInterval(121), now.addingTimeInterval(-1)] {
+            var queue = CodexPendingApprovalQueue()
+            queue.enqueue(id: try #require(CodexApprovalSignal.id(for: task)), task: task, now: now)
+            #expect(queue.drain(activeTasks: [task], now: time).isEmpty)
+        }
+        #expect(CodexApprovalSignal.id(for: task.withActivity(CodexTaskActivity(state: .needsAttention, attentionReason: .otherUserInput))) == nil)
+    }
+
 }

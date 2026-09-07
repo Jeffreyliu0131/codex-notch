@@ -4,6 +4,7 @@ import Combine
 import Foundation
 
 enum PreviewMode {
+    case unknown
     case running
     case attention
     case completion
@@ -22,6 +23,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var tasks: [CodexTask] = []
     @Published private(set) var completionPulseSequence: UInt = 0
     @Published private(set) var latestApprovalAlert: CodexApprovalAlert?
+    @Published var notificationStatus: String?
     @Published private(set) var viewedCompletionIDs: Set<String> = []
     @Published private(set) var usage: CodexUsageSnapshot?
     @Published private(set) var taskError: String?
@@ -95,8 +97,10 @@ final class AppModel: ObservableObject {
     }
 
     var runningCount: Int {
-        tasks.lazy.filter { $0.state.isLive }.count
+        tasks.lazy.filter { $0.state.isLive && $0.state != .unknown }.count
     }
+
+    var unknownCount: Int { tasks.lazy.filter { $0.state == .unknown }.count }
 
     var attentionCount: Int {
         tasks.lazy.filter { $0.state == .needsAttention }.count
@@ -261,7 +265,11 @@ final class AppModel: ObservableObject {
         taskError = nil
         viewedCompletionIDs.removeAll()
 
+        taskDataIsStale = false
         switch mode {
+        case .unknown:
+            tasks = [Self.previewTask(id: "unknown-synthetic", title: "核对未知来源状态", workspacePath: "/synthetic/project", updatedAt: now, state: .unknown)]
+            notificationStatus = "系统通知未授权 · 刘海提示仍可用"
         case .running:
             tasks = [
                 Self.previewTask(
@@ -464,9 +472,8 @@ final class AppModel: ObservableObject {
     private func emitApprovalAlerts(from tasks: [CodexTask], notify: Bool) {
         for task in tasks {
             guard let reason = task.attentionReason, reason.shouldAlert else { continue }
-            let rawSignalID = task.attentionSignalID
-                ?? "fallback:\(Int(task.updatedAt.timeIntervalSince1970 * 1_000))"
-            let signalID = "\(task.identityKey):\(reason.rawValue):\(rawSignalID)"
+            guard let signalID = CodexApprovalSignal.id(for: task) else { continue }
+            // This ledger means detected/presented once, never delivered or read.
             guard alertLedger.markIfNew(signalID) else { continue }
             guard notify else { continue }
             latestApprovalAlert = CodexApprovalAlert(

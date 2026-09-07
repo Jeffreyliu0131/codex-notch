@@ -5,6 +5,7 @@ import SwiftUI
 enum PreviewRenderer {
     private static let previewFlags = [
         "--render-preview",
+        "--render-unknown-preview",
         "--render-attention-preview",
         "--render-completion-preview",
         "--render-viewed-completion-preview",
@@ -24,7 +25,9 @@ enum PreviewRenderer {
     static func render(to destination: URL) throws {
         let model = AppModel()
         let previewMode: PreviewMode
-        if CommandLine.arguments.contains("--render-viewed-completion-preview") {
+        if CommandLine.arguments.contains("--render-unknown-preview") {
+            previewMode = .unknown
+        } else if CommandLine.arguments.contains("--render-viewed-completion-preview") {
             previewMode = .viewedCompletion
         } else if CommandLine.arguments.contains("--render-attention-preview") {
             previewMode = .attention
@@ -91,7 +94,8 @@ private struct ExpandedPreviewCanvas: View {
         NotchPanelController.expandedHeight(
             taskCount: model.tasks.count,
             projectCount: model.projectCount,
-            lensHeight: NotchPanelController.lensHeight(for: profile)
+            lensHeight: NotchPanelController.lensHeight(for: profile),
+            showsNotificationStatus: model.notificationStatus != nil
         )
     }
 

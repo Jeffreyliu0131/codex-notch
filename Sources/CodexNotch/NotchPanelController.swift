@@ -86,6 +86,14 @@ final class NotchPanelController: NSObject {
                 self.updateFrame(animated: true)
             }
             .store(in: &cancellables)
+        model.$notificationStatus
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.presentation.isExpanded else { return }
+                self.updateFrame(animated: true)
+            }
+            .store(in: &cancellables)
         model.$latestApprovalAlert
             .compactMap { $0 }
             .sink { [weak self] _ in
@@ -311,7 +319,8 @@ final class NotchPanelController: NSObject {
                 height: Self.expandedHeight(
                     taskCount: model.tasks.count,
                     projectCount: model.projectCount,
-                    lensHeight: Self.lensHeight(for: profile)
+                    lensHeight: Self.lensHeight(for: profile),
+                    showsNotificationStatus: model.notificationStatus != nil
                 )
             )
         }
@@ -354,7 +363,8 @@ final class NotchPanelController: NSObject {
     static func expandedHeight(
         taskCount: Int,
         projectCount: Int,
-        lensHeight: CGFloat = 38
+        lensHeight: CGFloat = 38,
+        showsNotificationStatus: Bool = false
     ) -> CGFloat {
         let dashboardHeight: CGFloat
         if taskCount > 0 {
@@ -367,7 +377,7 @@ final class NotchPanelController: NSObject {
         }
         return min(
             420,
-            max(232, lensHeight + 12 + dashboardHeight)
+            max(232, lensHeight + 12 + dashboardHeight + (showsNotificationStatus ? 28 : 0))
         )
     }
 }

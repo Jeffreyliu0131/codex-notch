@@ -105,6 +105,7 @@ After a debug build, the app can render representative states without capturing 
 
 ```bash
 ./.build/debug/CodexNotch --render-preview /tmp/codex-notch-preview.png
+./.build/debug/CodexNotch --render-unknown-preview /tmp/codex-notch-unknown.png
 ./.build/debug/CodexNotch --render-attention-preview /tmp/codex-notch-attention.png
 ./.build/debug/CodexNotch --render-completion-preview /tmp/codex-notch-completion.png
 ./.build/debug/CodexNotch --render-viewed-completion-preview /tmp/codex-notch-viewed-completion.png
@@ -150,3 +151,11 @@ Next evaluation: in an explicitly authorized local session, compare manual check
 Local acceptance: synthetic timeout/repository tests, Swift build and self-test. Release/install/profile actions are separate and have not run as part of this audit repair.
 
 Local verification on 2026-09-05: 13 Swift tests (including a synthetic slow-query deadline) and 41 self-checks passed. Local Codex database integration remained disabled.
+
+## Attention reliability · 2026-09-07
+
+Unknown or missing runtime status types are shown as **状态未知**, stay visible without triggering approval alerts, and cannot by themselves produce a completion pulse. Recognized idle behavior is unchanged. Ordinary user-input waits remain visible without proactive system notifications; explicit approval signals keep the existing alert policy.
+
+The approval ledger records detection deduplication, not delivery or reading. While notification authorization is unresolved, a bounded-age in-memory queue retains distinct task signals instead of only the latest one. Before submission it drops superseded, resolved or older-than-two-minute signals and checks source freshness and foreground state. The UI distinguishes denied permission, foreground suppression, failed request and system acceptance; acceptance never claims delivery or reading. A request completing after the approval changes requests notification removal. No notification text or new lifecycle telemetry is persisted.
+
+This iteration is owned by the public snapshot. It has not been ported to the independent local runtime, installed, or verified against real Codex conversations. Local validation passed: Swift build, 16 Swift Testing cases, 41 synthetic self-checks, and an off-screen unknown-state preview. A fresh temporary scratch/cache path avoided stale compiler artifacts from the old desktop symlink; no installed toolchain or existing cache was replaced. Notification permission/delivery and current installed Codex compatibility were not exercised.
