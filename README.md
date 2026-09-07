@@ -1,6 +1,12 @@
 # Codex Notch
 
-Codex Notch is an experimental native macOS companion that turns the display notch or menu bar into a compact status surface for local and connected Codex tasks.
+**Notice when a coding task needs you, without repeatedly checking.**
+
+Codex Notch is an experimental macOS companion that puts task status in the notch or menu bar. It distinguishes approval requests, ordinary input waits, failures, and unknown states.
+
+**Key choice:** keep routine activity quiet and surface actionable changes. Unknown status stays visible without pretending the task has finished.
+
+[**Build locally**](#build) · [What it demonstrates](#what-it-demonstrates) · [Privacy](PRIVACY.md) · [Compatibility](#compatibility-boundary)
 
 > **Unofficial project.** This repository is not affiliated with, maintained by, or endorsed by OpenAI. Codex and OpenAI are names and marks of their respective owner.
 
